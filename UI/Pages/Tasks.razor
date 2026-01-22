@@ -1,0 +1,265 @@
+﻿@page "/"
+@using System.Net.Http.Json
+@using System.ComponentModel.DataAnnotations
+@using Shared
+@inject HttpClient Http
+
+<div class="tp-shell">
+    <div class="tp-header">
+        <div>
+            <h1 class="tp-title">AI Tasks Prioritization </h1>
+            <p class="tp-subtitle">Add tasks and let AI predict priority (High / Medium / Low).</p>
+        </div>
+
+        <button class="tp-btn tp-btn-secondary" @onclick="Reload" disabled="@isLoading">
+            @(isLoading ? "Loading..." : "Refresh")
+        </button>
+    </div>
+
+    <div class="tp-grid">
+        <!-- Create Task Card -->
+        <div class="tp-card">
+            <div class="tp-card-header">
+                <div class="tp-card-title">Create Task</div>
+                <div class="tp-chip">AI Priority</div>
+            </div>
+
+            <EditForm Model="form" OnValidSubmit="CreateTask">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="tp-field">
+                    <label class="tp-label">Title</label>
+                    <InputText class="tp-input" @bind-Value="form.Title" placeholder="e.g., Prepare project demo" />
+                    <ValidationMessage For="() => form.Title" />
+                </div>
+
+                <div class="tp-field">
+                    <label class="tp-label">Description</label>
+                    <InputTextArea class="tp-textarea" @bind-Value="form.Description"
+                                   placeholder="Add details, impact, stakeholders, blockers..." />
+                    <ValidationMessage For="() => form.Description" />
+                </div>
+
+                <div class="tp-field">
+                    <label class="tp-label">Due date</label>
+                    <InputDate class="tp-input" @bind-Value="form.DueDate" />
+                    <div class="tp-help">Leave empty if there’s no deadline.</div>
+                </div>
+
+                <div class="tp-actions">
+                    <button class="tp-btn tp-btn-primary" type="submit" disabled="@isSaving">
+                        @(isSaving ? "Predicting..." : "Add & Predict Priority")
+                    </button>
+
+                    <button class="tp-btn tp-btn-ghost" type="button" @onclick="Clear" disabled="@isSaving">
+                        Clear
+                    </button>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(error))
+                {
+                   @*  <div class="tp-alert">
+                        <strong>Error:</strong> @error
+                    </div> *@
+                }
+            </EditForm>
+        </div>
+
+        <!-- List Card -->
+        <div class="tp-card">
+            <div class="tp-card-header">
+                <div class="tp-card-title">Task List</div>
+
+                <div class="tp-search">
+                    <span class="tp-search-icon">🔎</span>
+                    <input class="tp-search-input" placeholder="Search title/description..."
+                           @bind="search" @bind:event="oninput" />
+                </div>
+            </div>
+
+            <div class="tp-list-meta">
+                <span class="tp-muted">@FilteredTasks.Count task(s)</span>
+                <div class="tp-legend">
+                    <span class="tp-badge tp-high">High</span>
+                    <span class="tp-badge tp-medium">Medium</span>
+                    <span class="tp-badge tp-low">Low</span>
+                </div>
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="tp-skeleton">
+                    <div class="tp-skel-row"></div>
+                    <div class="tp-skel-row"></div>
+                    <div class="tp-skel-row"></div>
+                </div>
+            }
+            else if (FilteredTasks.Count == 0)
+            {
+                <div class="tp-empty">
+                    <div class="tp-empty-emoji">🗒️</div>
+                    <div class="tp-empty-title">No tasks yet</div>
+                    <div class="tp-empty-sub">Create your first task on the left.</div>
+                </div>
+            }
+            else
+            {
+                <div class="tp-list">
+                    @foreach (var t in FilteredTasks.OrderByDescending(PriorityRank).ThenBy(t => t.DueDate ?? DateTime.MaxValue))
+                    {
+                        <div class="tp-item @PriorityClass(t.Priority.ToString())">
+                            <div class="tp-item-top">
+                                <div class="tp-item-title">@t.Title</div>
+                                <div class="tp-badge @BadgeClass(t.Priority.ToString())">@t.Priority</div>
+                            </div>
+
+                            @if (!string.IsNullOrWhiteSpace(t.Description))
+                            {
+                                <div class="tp-item-desc">@t.Description</div>
+                            }
+
+                            <div class="tp-item-bottom">
+                                <span class="tp-muted">#@t.Id</span>
+                                <span class="tp-dot">•</span>
+                                <span class="tp-muted">
+                                    Due:
+                                    @if (t.DueDate.HasValue)
+                                    {
+                                        @t.DueDate.Value.ToString("yyyy-MM-dd")
+                                    }
+                                    else
+                                    {
+                                        <em>None</em>
+                                    }
+                                </span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<TaskItemDto> tasks = new();
+    private string search = "";
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string? error;
+
+    private CreateTaskForm form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Reload();
+    }
+
+    private async Task Reload()
+    {
+        try
+        {
+            error = null;
+            isLoading = true;
+
+            var res = await Http.GetAsync("api/tasks");
+
+            if (!res.IsSuccessStatusCode)
+            {
+                var body = await res.Content.ReadAsStringAsync();
+                error = $"GET /api/tasks failed: {(int)res.StatusCode} {res.ReasonPhrase}. {body}";
+                tasks = new();
+                return;
+            }
+
+            tasks = await res.Content.ReadFromJsonAsync<List<TaskItemDto>>() ?? new();
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            tasks = new();
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task CreateTask()
+    {
+        try
+        {
+            error = null;
+            isSaving = true;
+
+            // We post as TaskItemDto. Your API can accept TaskItemDto OR TaskItem;
+            // if it accepts TaskItem (entity), mirror property names.
+            var res = await Http.PostAsJsonAsync("api/tasks", new
+            {
+                title = form.Title,
+                description = form.Description,
+                dueDate = form.DueDate
+            });
+
+            res.EnsureSuccessStatusCode();
+
+            // Reload list (simple + reliable)
+            await Reload();
+            Clear();
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private void Clear()
+    {
+        form = new CreateTaskForm();
+    }
+
+    private List<TaskItemDto> FilteredTasks =>
+        string.IsNullOrWhiteSpace(search)
+            ? tasks
+            : tasks.Where(t =>
+                (t.Title?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (t.Description?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false)
+              ).ToList();
+
+    private static int PriorityRank(TaskItemDto t) => t.Priority switch
+    {
+        TaskPriority.High => 3,
+        TaskPriority.Medium => 2,
+        _ => 1
+    };
+
+    private static string PriorityClass(string priority) => priority switch
+    {
+        "High" => "tp-item-high",
+        "Medium" => "tp-item-medium",
+        _ => "tp-item-low"
+    };
+
+    private static string BadgeClass(string priority) => priority switch
+    {
+        "High" => "tp-high",
+        "Medium" => "tp-medium",
+        _ => "tp-low"
+    };
+
+    public class CreateTaskForm
+    {
+        [Required, MinLength(3)]
+        public string Title { get; set; } = "";
+
+        [Required, MinLength(5)]
+        public string Description { get; set; } = "";
+
+        public DateTime? DueDate { get; set; }
+    }
+}
