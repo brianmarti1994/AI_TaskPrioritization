@@ -1,7 +1,15 @@
 # 🤖 AI Task Prioritization App
 
-<img width="450" height="300" alt="image" src="https://github.com/user-attachments/assets/3fa3e4aa-179d-4495-bf5d-128590c82609" />
-
+<p align="center">
+<a href="https://youtu.be/DyXN1GHXhQg" target="_blank">
+  <img
+    width="400"
+    height="280"
+    alt="Watch demo video"
+    src="https://github.com/user-attachments/assets/93a15e64-ca78-49cc-92d6-49775e718448"
+  />
+</a>
+</p>
 
 > A full-stack **.NET + Blazor WebAssembly** application that uses **AI (Google Gemini)** to automatically predict and highlight **High / Medium / Low** priority tasks.
 
